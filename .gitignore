@@ -1,0 +1,7 @@
+# nada de dado neste repositório público
+data/
+*.csv
+*.json
+!package.json
+.env
+__pycache__/
