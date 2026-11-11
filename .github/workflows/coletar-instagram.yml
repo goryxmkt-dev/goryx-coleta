@@ -1,0 +1,102 @@
+# Coleta do Instagram pela API oficial da Meta.
+# Grava direto no repositório PRIVADO goryx-marketing (data/instagram/). Nada coletado fica aqui.
+# O log mostra só contagens e status.
+#
+# Segredos deste repositório (Settings > Secrets and variables > Actions):
+#   IG_ACCESS_TOKEN        token da Meta (app "Goryx Marketing")
+#   MARKETING_REPO_TOKEN   token do GitHub só com "Contents: read and write" no goryx-marketing
+#   ALVOS_JSON (opcional)  lista de @ das contas a observar; sem ele, usa data/instagram/alvos.json do privado
+#   IG_APP_SECRET (opcional) se o app exigir "appsecret_proof"
+name: Coletar Instagram
+
+on:
+  schedule:
+    - cron: "17 10 * * *"   # todo dia, 07h17 em Brasília
+  workflow_dispatch:
+    inputs:
+      comando:
+        description: "O que rodar"
+        required: true
+        default: diagnostico
+        type: choice
+        options: [diagnostico, conta, concorrentes, tudo]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: coletar-instagram
+  cancel-in-progress: false
+
+env:
+  IG_USER_ID: ${{ vars.IG_USER_ID || '17841443090285503' }}
+  IG_PAGE_ID: ${{ vars.IG_PAGE_ID || '1377556508781330' }}
+  IG_API_VERSION: ${{ vars.IG_API_VERSION || 'v24.0' }}
+  DESTINO_REPO: goryxmkt-dev/goryx-marketing
+
+jobs:
+  coletar:
+    if: github.repository == 'goryxmkt-dev/goryx-coleta'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Baixar os coletores
+        uses: actions/checkout@v7
+
+      - name: Preparar Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Testes dos coletores (sem rede)
+        run: python3 -m unittest discover -s testes
+
+      - name: Diagnóstico da conexão com a Meta
+        # mostra o que falta (permissão, Página, cota) sem impedir a coleta do que já funciona
+        continue-on-error: ${{ github.event_name == 'schedule' || inputs.comando != 'diagnostico' }}
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_APP_SECRET: ${{ secrets.IG_APP_SECRET }}
+        run: python3 -m coletores.instagram.coletar diagnostico
+
+      - name: Baixar o destino privado
+        if: github.event_name == 'schedule' || inputs.comando != 'diagnostico'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.DESTINO_REPO }}
+          token: ${{ secrets.MARKETING_REPO_TOKEN }}
+          path: destino
+          persist-credentials: true
+
+      - name: Coletar a conta da Goryx
+        if: github.event_name == 'schedule' || inputs.comando == 'conta' || inputs.comando == 'tudo'
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_APP_SECRET: ${{ secrets.IG_APP_SECRET }}
+        run: python3 -m coletores.instagram.coletar conta --saida destino/data/instagram/conta
+
+      - name: Coletar contas de referência (Business Discovery)
+        if: github.event_name == 'schedule' || inputs.comando == 'concorrentes' || inputs.comando == 'tudo'
+        env:
+          IG_ACCESS_TOKEN: ${{ secrets.IG_ACCESS_TOKEN }}
+          IG_APP_SECRET: ${{ secrets.IG_APP_SECRET }}
+          ALVOS_JSON: ${{ secrets.ALVOS_JSON }}
+        run: |
+          python3 -m coletores.instagram.coletar concorrentes \
+            --saida destino/data/instagram/concorrentes \
+            --alvos-arquivo destino/data/instagram/alvos.json
+
+      - name: Gravar no repositório privado
+        if: github.event_name == 'schedule' || inputs.comando != 'diagnostico'
+        working-directory: destino
+        run: |
+          git config user.name "goryx-coleta"
+          git config user.email "coleta@users.noreply.github.com"
+          git add data/instagram
+          if git diff --cached --quiet; then echo "Nada novo para gravar."; exit 0; fi
+          git commit -q -m "Coleta do Instagram de $(TZ=America/Sao_Paulo date +%d/%m/%Y)"
+          for i in 1 2 3 4; do
+            git pull -q --rebase origin HEAD && git push -q origin HEAD && { echo "Gravado."; exit 0; }
+            sleep $((2 ** i))
+          done
+          echo "Não consegui gravar no destino."; exit 1
