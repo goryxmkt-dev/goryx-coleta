@@ -190,7 +190,7 @@ def token_da_pagina(g: Graph, pagina_id: str) -> Graph:
 PERMISSOES_ESPERADAS = [
     "instagram_basic", "instagram_content_publish", "instagram_manage_comments",
     "instagram_manage_insights", "instagram_manage_messages", "pages_show_list",
-    "pages_read_engagement", "pages_manage_metadata", "business_management",
+    "pages_read_engagement", "pages_manage_metadata", "pages_manage_posts", "business_management",
 ]
 
 
@@ -224,6 +224,17 @@ def diagnostico(g: Graph, ig_id: str, pagina_id: str) -> list[tuple[str, str]]:
             d.get("quota_usage", "?"), (d.get("config") or {}).get("quota_total", "?"))
 
     tenta("Cota de publicação", cota)
+
+    def pagina():
+        try:
+            tok = g.get(pagina_id, fields="access_token").get("access_token")
+        except ErroGraph as e:
+            return f"FALHOU ao pegar o token da Página ({e.codigo}: {e.mensagem})"
+        if not tok:
+            return "o token não devolveu o token da Página (usando o próprio token)"
+        return "ok (token da Página obtido)"
+
+    tenta("Token da Página (envio de imagens)", pagina)
 
     def dm():
         gp = token_da_pagina(g, pagina_id)
