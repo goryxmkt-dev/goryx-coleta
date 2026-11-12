@@ -138,6 +138,13 @@ class Graph:
             if 200 <= status < 300 and "error" not in dados:
                 return dados
             err = dados.get("error", {}) if isinstance(dados, dict) else {}
+            if not err and isinstance(dados, dict) and isinstance(dados.get("debug_info"), dict):
+                # formato do servidor de envio de vídeo (rupload)
+                info = dados["debug_info"]
+                err = {"type": info.get("type", "Envio"), "message": info.get("message"),
+                       "is_transient": info.get("retriable")}
+            if not err:
+                err = {"message": self._limpar(bruto.decode(errors="replace")[:300]) or None}
             ultimo = ErroGraph(
                 status, err.get("code"), err.get("error_subcode"), err.get("type", "Erro"),
                 self._limpar(str(err.get("error_user_msg") or err.get("message") or "sem mensagem")),
